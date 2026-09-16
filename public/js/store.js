@@ -51,11 +51,18 @@ var TaskStore = (function () {
       description: data.description || "",
       category: data.category || "Inne",
       priority: data.priority || "sredni",
-      done: false,
+      done: !!data.done,
       lat: data.lat,
       lng: data.lng,
       createdAt: Date.now(),
     };
+    tasks.push(task);
+    persist();
+    return task;
+  }
+
+  // Wstawia gotowy obiekt zadania bez zmian (np. cofnięcie usunięcia).
+  function insert(task) {
     tasks.push(task);
     persist();
     return task;
@@ -96,21 +103,13 @@ var TaskStore = (function () {
     };
   }
 
-  // Wszystkie zadania -> GeoJSON FeatureCollection (wejście dla Turf.js).
-  function toFeatureCollection() {
-    return {
-      type: "FeatureCollection",
-      features: tasks.map(toFeature),
-    };
-  }
-
   return {
     all: all,
     get: get,
     add: add,
+    insert: insert,
     update: update,
     remove: remove,
     toFeature: toFeature,
-    toFeatureCollection: toFeatureCollection,
   };
 })();

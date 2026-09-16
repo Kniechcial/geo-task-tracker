@@ -2,7 +2,10 @@
 <html lang="pl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  />
   <title>GeoTasker — zadania na mapie</title>
 
   <!-- Leaflet CSS -->
@@ -20,25 +23,93 @@
   <div id="app">
     <!-- Panel boczny -->
     <aside id="sidebar" class="sidebar">
+      <!-- Uchwyt do zwijania/rozwijania panelu (widoczny na mobile) -->
+      <button
+        id="sheet-handle"
+        class="sidebar__handle"
+        type="button"
+        aria-label="Zwiń lub rozwiń panel"
+      >
+        <span class="sidebar__grabber"></span>
+      </button>
+
       <header class="sidebar__header">
         <h1 class="sidebar__title">GeoTasker</h1>
         <p class="sidebar__subtitle">Twoje zadania przypięte do mapy</p>
+        <p id="stats" class="sidebar__stats">Zadania: 0 · Ukończone: 0</p>
       </header>
+
+      <!-- Narzędzia: szukaj / filtr / sortowanie -->
+      <div class="tools">
+        <input
+          id="search"
+          class="tools__search"
+          type="search"
+          placeholder="Szukaj zadań…"
+          autocomplete="off"
+        />
+        <div class="segmented" id="filter">
+          <button class="segmented__btn is-active" data-filter="all" type="button">
+            Wszystkie
+          </button>
+          <button class="segmented__btn" data-filter="active" type="button">
+            Aktywne
+          </button>
+          <button class="segmented__btn" data-filter="done" type="button">
+            Wykonane
+          </button>
+        </div>
+        <label class="tools__sort">
+          <span>Sortuj:</span>
+          <select id="sort" class="tools__select">
+            <option value="created">Najnowsze</option>
+            <option value="priority">Priorytet</option>
+            <option value="distance">Odległość ode mnie</option>
+          </select>
+        </label>
+      </div>
 
       <div class="sidebar__body">
         <!-- Pasek trasy (widoczny w trybie trasy) -->
-        <div id="route-bar" class="route-bar" hidden>
-          <div class="route-bar__info">
-            <strong id="route-distance" class="route-bar__distance">0 m</strong>
-            <span id="route-count" class="route-bar__count">0 przystanków</span>
+        <div id="route-bar" class="info-bar info-bar--route" hidden>
+          <div class="info-bar__text">
+            <strong id="route-distance" class="info-bar__value">0 m</strong>
+            <span id="route-count" class="info-bar__label">0 przystanków</span>
           </div>
           <button id="route-clear" class="btn btn--ghost btn--sm" type="button">
             Wyczyść
           </button>
         </div>
-
-        <p id="route-hint" class="route-hint" hidden>
+        <p id="route-hint" class="mode-hint" hidden>
           Klikaj zadania w kolejności, aby ułożyć trasę.
+        </p>
+
+        <!-- Pasek strefy (widoczny w trybie strefy) -->
+        <div id="zone-bar" class="info-bar info-bar--zone" hidden>
+          <div class="info-bar__text">
+            <strong id="zone-area" class="info-bar__value">0 m²</strong>
+            <span id="zone-count" class="info-bar__label">0 zadań w strefie</span>
+          </div>
+          <button id="zone-clear" class="btn btn--ghost btn--sm" type="button">
+            Wyczyść
+          </button>
+        </div>
+        <p id="zone-hint" class="mode-hint" hidden>
+          Klikaj na mapie, aby narysować strefę (min. 3 punkty).
+        </p>
+
+        <!-- Pasek pomiaru (widoczny w trybie pomiaru) -->
+        <div id="measure-bar" class="info-bar info-bar--measure" hidden>
+          <div class="info-bar__text">
+            <strong id="measure-distance" class="info-bar__value">0 m</strong>
+            <span id="measure-count" class="info-bar__label">0 punktów</span>
+          </div>
+          <button id="measure-clear" class="btn btn--ghost btn--sm" type="button">
+            Wyczyść
+          </button>
+        </div>
+        <p id="measure-hint" class="mode-hint" hidden>
+          Klikaj punkty na mapie, aby zmierzyć odległość (min. 2 punkty).
         </p>
 
         <!-- Lista zadań (wypełniana dynamicznie) -->
@@ -48,12 +119,22 @@
       </div>
 
       <footer class="sidebar__footer">
-        <button id="route-toggle" class="btn btn--ghost" type="button">
-          Tryb trasy
-        </button>
-        <button id="locate-btn" class="btn btn--ghost" type="button">
-          Moja lokalizacja
-        </button>
+        <div class="footer-row">
+          <button id="route-toggle" class="btn btn--ghost btn--sm" type="button">
+            Trasa
+          </button>
+          <button id="zone-toggle" class="btn btn--ghost btn--sm" type="button">
+            Strefa
+          </button>
+          <button id="measure-toggle" class="btn btn--ghost btn--sm" type="button">
+            Pomiar
+          </button>
+        </div>
+        <div class="footer-row">
+          <button id="locate-btn" class="btn btn--ghost" type="button">
+            Moja lokalizacja
+          </button>
+        </div>
       </footer>
     </aside>
 
@@ -124,6 +205,9 @@
       </form>
     </div>
   </div>
+
+  <!-- Toast (powiadomienia) -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- Biblioteki (CDN) -->
   <script
