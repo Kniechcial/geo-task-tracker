@@ -140,6 +140,28 @@
 
     <!-- Mapa -->
     <main class="map-wrap">
+      <!-- Wyszukiwarka miejsc (adres lub współrzędne) -->
+      <div class="map-search">
+        <form id="place-search-form" class="map-search__form" autocomplete="off">
+          <input
+            id="place-search"
+            class="map-search__input"
+            type="search"
+            placeholder="Szukaj adresu lub współrzędnych…"
+            aria-label="Szukaj miejsca na mapie"
+          />
+          <button
+            id="place-search-btn"
+            class="map-search__btn"
+            type="submit"
+            aria-label="Szukaj"
+          >
+            🔍
+          </button>
+        </form>
+        <div id="place-results" class="map-search__results" hidden></div>
+      </div>
+
       <div id="map" class="map"></div>
     </main>
   </div>

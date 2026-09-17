@@ -18,6 +18,7 @@
   var hasInteracted = false; // czy użytkownik już wchodził w interakcję z mapą
   var markers = {}; // id zadania -> Leaflet marker
   var activeId = null; // aktualnie podświetlone zadanie
+  var searchMarker = null; // pinezka wyniku wyszukiwarki miejsc
 
   // Widok listy
   var filterState = "all"; // all | active | done
@@ -218,6 +219,25 @@
     }
   }
 
+  // Czy pinezka danego zadania ma być widoczna przy bieżącym filtrze kategorii.
+  function markerVisibleUnderFilter(task) {
+    if (filterState === "active") return !task.done;
+    if (filterState === "done") return !!task.done;
+    return true; // "all"
+  }
+
+  // Pokaż/ukryj pinezki na mapie zgodnie z aktywnym filtrem (Wszystkie/Aktywne/Wykonane).
+  function refreshMarkerVisibility() {
+    TaskStore.all().forEach(function (task) {
+      var marker = markers[task.id];
+      if (!marker) return;
+      var shouldShow = markerVisibleUnderFilter(task);
+      var onMap = map.hasLayer(marker);
+      if (shouldShow && !onMap) marker.addTo(map);
+      else if (!shouldShow && onMap) map.removeLayer(marker);
+    });
+  }
+
   /* ---------------- Lista (panel boczny) ---------------- */
 
   // Zadania po zastosowaniu filtra, wyszukiwarki i sortowania.
@@ -275,6 +295,7 @@
         $list.append(buildTaskItem(task));
       });
     }
+    refreshMarkerVisibility();
     updateStats();
   }
 
@@ -320,6 +341,9 @@
     $meta.appendTo($main);
 
     var $actions = $('<div class="task-item__actions"></div>');
+    $('<button class="icon-btn" title="Nawiguj w Mapach Google">🧭</button>')
+      .attr("data-action", "navigate")
+      .appendTo($actions);
     $('<button class="icon-btn" title="Edytuj">✏️</button>')
       .attr("data-action", "edit")
       .appendTo($actions);
@@ -800,6 +824,131 @@
     renderList();
   }
 
+  // Otwiera Mapy Google z wyznaczaniem trasy do lokalizacji zadania.
+  // Google domyślnie użyje bieżącej lokalizacji użytkownika jako punktu startu.
+  function openGoogleMapsRoute(id) {
+    var task = TaskStore.get(id);
+    if (!task) return;
+    var dest = encodeURIComponent(task.lat + "," + task.lng);
+    var url =
+      "https://www.google.com/maps/dir/?api=1&destination=" +
+      dest +
+      "&travelmode=driving";
+    window.open(url, "_blank", "noopener");
+  }
+
+  /* ---------------- Wyszukiwarka miejsc na mapie ---------------- */
+
+  // Rozpoznaje wpis "lat, lng" (lub "lat lng") i zwraca [lat, lng] albo null.
+  function parseCoords(str) {
+    var m = String(str).match(
+      /^\s*(-?\d{1,2}(?:[.,]\d+)?)\s*[,; ]\s*(-?\d{1,3}(?:[.,]\d+)?)\s*$/
+    );
+    if (!m) return null;
+    var lat = parseFloat(m[1].replace(",", "."));
+    var lng = parseFloat(m[2].replace(",", "."));
+    if (isNaN(lat) || isNaN(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return [lat, lng];
+  }
+
+  // Uruchamia wyszukiwanie: najpierw próba współrzędnych, inaczej geokodowanie adresu.
+  function runPlaceSearch() {
+    var q = $("#place-search").val().trim();
+    if (!q) return;
+    var coords = parseCoords(q);
+    if (coords) {
+      hideSearchResults();
+      showSearchResult(coords[0], coords[1], "Współrzędne: " + q);
+      return;
+    }
+    geocodePlace(q);
+  }
+
+  // Geokodowanie adresu przez Nominatim (OpenStreetMap) — bez klucza API.
+  function geocodePlace(query) {
+    var url =
+      "https://nominatim.openstreetmap.org/search?format=json&limit=5" +
+      "&accept-language=pl&q=" +
+      encodeURIComponent(query);
+
+    $("#place-results")
+      .empty()
+      .append('<div class="map-search__empty">Szukam…</div>')
+      .prop("hidden", false);
+
+    fetch(url, { headers: { Accept: "application/json" } })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (results) {
+        renderSearchResults(Array.isArray(results) ? results : []);
+      })
+      .catch(function () {
+        hideSearchResults();
+        toast("Nie udało się wyszukać miejsca");
+      });
+  }
+
+  function renderSearchResults(results) {
+    var $box = $("#place-results").empty();
+    if (!results.length) {
+      $('<div class="map-search__empty">Brak wyników</div>').appendTo($box);
+      $box.prop("hidden", false);
+      return;
+    }
+    results.forEach(function (r) {
+      $('<button type="button" class="map-search__item"></button>')
+        .text(r.display_name)
+        .attr("data-lat", r.lat)
+        .attr("data-lng", r.lon)
+        .attr("data-label", r.display_name)
+        .appendTo($box);
+    });
+    $box.prop("hidden", false);
+  }
+
+  function hideSearchResults() {
+    $("#place-results").empty().prop("hidden", true);
+  }
+
+  // Centruje mapę na wyniku i stawia pinezkę z opcją dodania zadania w tym miejscu.
+  function showSearchResult(lat, lng, label) {
+    if (searchMarker) {
+      map.removeLayer(searchMarker);
+      searchMarker = null;
+    }
+    searchMarker = L.marker([lat, lng]).addTo(map);
+
+    var $content = $('<div class="place-popup"></div>');
+    $("<strong></strong>")
+      .text(label || "Znalezione miejsce")
+      .appendTo($content);
+    $('<div class="place-popup__coord"></div>')
+      .text(lat.toFixed(5) + ", " + lng.toFixed(5))
+      .appendTo($content);
+    $(
+      '<button class="btn btn--primary btn--sm place-popup__add" type="button">Dodaj zadanie tutaj</button>'
+    )
+      .on("click", function () {
+        map.closePopup();
+        clearSearchMarker();
+        openModalForNew(lat, lng);
+      })
+      .appendTo($content);
+
+    searchMarker.bindPopup($content[0]).openPopup();
+    map.setView([lat, lng], Math.max(map.getZoom(), 15));
+    hasInteracted = true;
+  }
+
+  function clearSearchMarker() {
+    if (searchMarker) {
+      map.removeLayer(searchMarker);
+      searchMarker = null;
+    }
+  }
+
   /* ---------------- Toast ---------------- */
 
   var toastTimer = null;
@@ -849,6 +998,10 @@
       toggleDone($(this).closest(".task-item").data("id"));
     });
 
+    $("#task-list").on("click", '[data-action="navigate"]', function (e) {
+      e.stopPropagation();
+      openGoogleMapsRoute($(this).closest(".task-item").data("id"));
+    });
     $("#task-list").on("click", '[data-action="edit"]', function (e) {
       e.stopPropagation();
       openModalForEdit($(this).closest(".task-item").data("id"));
@@ -864,7 +1017,9 @@
       hideModal();
     });
     $(document).on("keydown", function (e) {
-      if (e.key === "Escape" && !$modal.attr("hidden")) hideModal();
+      if (e.key !== "Escape") return;
+      if (!$modal.attr("hidden")) hideModal();
+      else hideSearchResults();
     });
 
     // Tryby.
@@ -901,6 +1056,24 @@
     // Lokalizacja.
     $("#locate-btn").on("click", function () {
       locateUser({ center: true });
+    });
+
+    // Wyszukiwarka miejsc na mapie.
+    $("#place-search-form").on("submit", function (e) {
+      e.preventDefault();
+      runPlaceSearch();
+    });
+    $("#place-results").on("click", ".map-search__item", function () {
+      var lat = parseFloat($(this).attr("data-lat"));
+      var lng = parseFloat($(this).attr("data-lng"));
+      var label = $(this).attr("data-label");
+      hideSearchResults();
+      $("#place-search").val("");
+      showSearchResult(lat, lng, label);
+    });
+    // Zamknij listę wyników po kliknięciu poza wyszukiwarką.
+    $(document).on("click", function (e) {
+      if (!$(e.target).closest(".map-search").length) hideSearchResults();
     });
   }
 
