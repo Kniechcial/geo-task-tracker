@@ -1,0 +1,6 @@
+{
+  // Live Server serwuje folder "public" jako katalog główny,
+  // dzięki czemu http://localhost:5500/ od razu otwiera aplikację
+  // (index.html), a nie listę plików projektu z folderem "public".
+  "liveServer.settings.root": "/public"
+}

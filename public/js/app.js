@@ -8,6 +8,12 @@
   var DEFAULT_CENTER = [50.0647, 19.945]; // Kraków
   var DEFAULT_ZOOM = 13;
 
+  // Publiczne usługi WMS GUGiK (bez klucza API). Adresy z geoportal.gov.pl.
+  var WMS_ORTOFOTO =
+    "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/StandardResolution";
+  var WMS_KIEG =
+    "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow";
+
   var CATEGORY_DEFAULT = "Inne";
   var PRIORITY_LABEL = { wysoki: "Wysoki", sredni: "Średni", niski: "Niski" };
   var PRIORITY_RANK = { wysoki: 0, sredni: 1, niski: 2 };
@@ -45,17 +51,99 @@
 
   /* ---------------- Mapa ---------------- */
 
+  // Serwery WMS GUGiK bywają przeciążone i sporadycznie zwracają błąd dla
+  // pojedynczych kafelków. Leaflet domyślnie NIE ponawia takiego kafelka —
+  // zostaje trwała dziura, aż użytkownik przesunie/przybliży mapę. Dlatego
+  // nieudane kafelki ponawiamy kilka razy z rosnącym odstępem (backoff);
+  // parametr _retry omija błędną odpowiedź zapisaną w cache przeglądarki.
+  function enableTileRetry(layer, maxRetries, baseDelay) {
+    maxRetries = maxRetries || 3;
+    baseDelay = baseDelay || 700;
+    var retries = {}; // "z:x:y" -> liczba dotychczasowych prób
+
+    layer.on("tileerror", function (e) {
+      var tile = e.tile;
+      if (!tile || !e.coords) return;
+      var key = e.coords.z + ":" + e.coords.x + ":" + e.coords.y;
+      var n = retries[key] || 0;
+      if (n >= maxRetries) return;
+      retries[key] = n + 1;
+      var src = tile.src.replace(/&_retry=[^&]*/, "");
+      setTimeout(function () {
+        // Ponawiamy tylko kafelek nadal obecny w DOM (nie "przycięty" po pan/zoom).
+        if (tile.parentNode) {
+          tile.src = src + "&_retry=" + retries[key] + "." + Date.now();
+        }
+      }, baseDelay * (n + 1));
+    });
+
+    layer.on("tileload", function (e) {
+      if (e.coords) delete retries[e.coords.z + ":" + e.coords.x + ":" + e.coords.y];
+    });
+
+    return layer;
+  }
+
   function initMap() {
     map = L.map("map", { zoomControl: true }).setView(
       DEFAULT_CENTER,
       DEFAULT_ZOOM
     );
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    // --- Podkłady (base layers) — wybiera się jeden na raz ---
+    var osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map);
+    });
+
+    // Ortofotomapa GUGiK jako alternatywny podkład (WMS, warstwa "Raster").
+    var ortofoto = enableTileRetry(
+      L.tileLayer.wms(WMS_ORTOFOTO, {
+        layers: "Raster",
+        format: "image/jpeg",
+        transparent: false,
+        maxZoom: 22,
+        attribution: "Ortofotomapa &copy; GUGiK",
+      })
+    );
+
+    // --- Warstwy danych (overlays) — można nakładać na podkład ---
+    // Działki ewidencyjne wraz z numerami (Krajowa Integracja Ewidencji Gruntów).
+    var dzialki = enableTileRetry(
+      L.tileLayer.wms(WMS_KIEG, {
+        layers: "dzialki,numery_dzialek",
+        format: "image/png",
+        transparent: true,
+        opacity: 0.7,
+        maxZoom: 22,
+        attribution: "Ewidencja gruntów &copy; GUGiK",
+      })
+    );
+
+    // Budynki z ewidencji gruntów i budynków.
+    var budynki = enableTileRetry(
+      L.tileLayer.wms(WMS_KIEG, {
+        layers: "budynki",
+        format: "image/png",
+        transparent: true,
+        opacity: 0.7,
+        maxZoom: 22,
+        attribution: "Budynki &copy; GUGiK",
+      })
+    );
+
+    // Na start pokazujemy OpenStreetMap.
+    osm.addTo(map);
+
+    // Przełącznik warstw (prawy górny róg): wybór podkładu + włączanie danych.
+    L.control
+      .layers(
+        { OpenStreetMap: osm, "Ortofotomapa (GUGiK)": ortofoto },
+        { "Działki ewidencyjne": dzialki, Budynki: budynki },
+        { collapsed: true }
+      )
+      .addTo(map);
 
     map.on("click", function (e) {
       if (zoneMode) {
@@ -69,6 +157,17 @@
       if (routeMode) return;
       hasInteracted = true;
       openModalForNew(e.latlng.lat, e.latlng.lng);
+    });
+
+    // Przy starcie kontener mapy może nie mieć jeszcze finalnego rozmiaru
+    // (układ flex/CSS jeszcze się ustala). Leaflet buforuje wtedy za mały
+    // rozmiar i pobiera kafelki tylko dla małego wycinka — stąd "połowiczna"
+    // mapa na pierwszej klatce. Po ułożeniu strony przeliczamy rozmiar, żeby
+    // dociągnąć brakujące kafelki bez czekania na interakcję użytkownika.
+    map.whenReady(function () {
+      requestAnimationFrame(function () {
+        map.invalidateSize(false);
+      });
     });
   }
 
